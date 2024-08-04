@@ -1,80 +1,85 @@
 import requests
 import spacy
 import nltk
-from nltk import pos_tag
-from nltk.chunk import ne_chunk
-from nltk.tokenize import word_tokenize
-
-# Load SpaCy model
-nlp = spacy.load("en_core_web_sm")
+from nltk import word_tokenize, pos_tag, ne_chunk
 
 # Fetch news article from News API
-def fetch_news_article(api_key, url):
-    headers = {'Authorization': f'Bearer {api_key}'}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()['articles'][0]['content']  # Adjust based on the API response structure
-    else:
+def fetch_news_article(api_key):
+    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={api_key}"
+    response = requests.get(url)
+    
+    if response.status_code != 200:
+        print(f"Error: Unable to fetch news articles. Status code: {response.status_code}")
+        print(response.text)
         return None
-
-# Extract entities using SpaCy
-def extract_entities_spacy(text):
-    doc = nlp(text)
-    entities = {"PERSON": [], "ORG": [], "GPE": []}
-    for ent in doc.ents:
-        if ent.label_ in entities:
-            entities[ent.label_].append(ent.text)
-    return entities
+    
+    data = response.json()
+    if 'articles' not in data or not data['articles']:
+        print("No news articles found in the response.")
+        return None
+    
+    article = data['articles'][0]
+    article_text = f"{article['title']}. {article['description']}"
+    
+    return article_text
 
 # Extract entities using NLTK
 def extract_entities_nltk(text):
-    tokens = word_tokenize(text)
-    tagged_tokens = pos_tag(tokens)
-    chunked_tokens = ne_chunk(tagged_tokens)
+    nltk.download('punkt', quiet=True)
+    nltk.download('maxent_ne_chunker', quiet=True)
+    nltk.download('words', quiet=True)
     
-    entities = {"PERSON": [], "ORG": [], "GPE": []}
-    for chunk in chunked_tokens:
-        if isinstance(chunk, nltk.Tree):
-            entity_type = chunk.label()
-            if entity_type in entities:
-                entities[entity_type].append(' '.join(word for word, tag in chunk))
+    words = word_tokenize(text)
+    pos_tags = pos_tag(words)
+    tree = ne_chunk(pos_tags)
+    
+    entities = []
+    for subtree in tree:
+        if hasattr(subtree, 'label'):
+            entity_name = ' '.join(c[0] for c in subtree)
+            entity_type = subtree.label()
+            entities.append((entity_name, entity_type))
     return entities
 
-# Compare results
-def compare_results(entities_spacy, entities_nltk):
-    comparison = {}
-    for key in entities_spacy:
-        spacy_entities = set(entities_spacy[key])
-        nltk_entities = set(entities_nltk[key])
-        comparison[key] = {
-            "SpaCy": spacy_entities,
-            "NLTK": nltk_entities,
-            "Common": spacy_entities & nltk_entities,
-            "Unique to SpaCy": spacy_entities - nltk_entities,
-            "Unique to NLTK": nltk_entities - spacy_entities
-        }
-    return comparison
+# Extract entities using SpaCy
+def extract_entities_spacy(text):
+    nlp = spacy.load('en_core_web_sm')
+    doc = nlp(text)
+    entities = [(ent.text, ent.label_) for ent in doc.ents]
+    return entities
 
-# Example usage
-if __name__ == "__main__":
-    # Replace with your News API key and URL
-    API_KEY = 'c858b684138c4ac192dee23caaaeedb4'
-    URL = f'https://newsapi.org/v2/top-headlines?country=us&apiKey={API_KEY}'
+# Compare entities
+def compare_entities(nltk_entities, spacy_entities):
+    nltk_set = set(nltk_entities)
+    spacy_set = set(spacy_entities)
     
-    article_text = fetch_news_article(API_KEY, URL)
+    common = nltk_set & spacy_set
+    only_nltk = nltk_set - spacy_set
+    only_spacy = spacy_set - nltk_set
+    
+    return common, only_nltk, only_spacy
+
+# Main execution
+if __name__ == "__main__":
+    API_KEY = 'c858b684138c4ac192dee23caaaeedb4'
+    article_text = fetch_news_article(API_KEY)
+    
     if article_text:
-        print("Extracting entities using SpaCy...")
-        entities_spacy = extract_entities_spacy(article_text)
+        print("Fetched Article Text:", article_text)
         
-        print("Extracting entities using NLTK...")
-        entities_nltk = extract_entities_nltk(article_text)
+        # Extract entities using NLTK
+        nltk_entities = extract_entities_nltk(article_text)
+        print("NLTK Entities:", nltk_entities)
         
-        print("Comparing results...")
-        comparison = compare_results(entities_spacy, entities_nltk)
+        # Extract entities using SpaCy
+        spacy_entities = extract_entities_spacy(article_text)
+        print("SpaCy Entities:", spacy_entities)
         
-        print("Entities Extracted:")
-        print("SpaCy:", entities_spacy)
-        print("NLTK:", entities_nltk)
-        print("Comparison:", comparison)
+        # Compare entities
+        common_entities, nltk_only_entities, spacy_only_entities = compare_entities(nltk_entities, spacy_entities)
+        
+        print("Common Entities:", common_entities)
+        print("Entities only in NLTK:", nltk_only_entities)
+        print("Entities only in SpaCy:", spacy_only_entities)
     else:
-        print("Failed to fetch news article.")
+        print("No article text fetched.")
